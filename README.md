@@ -78,6 +78,7 @@ REDIS_HOST=localhost
 REDIS_PORT=6379
 REDIS_USERNAME=default
 REDIS_PASSWORD=your_password
+DOMAINS=["https://www.amazon.com","https://www.flipkart.com"]
 ```
 
 3. Start Redis server
