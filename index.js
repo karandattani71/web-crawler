@@ -1,11 +1,11 @@
 const { Worker } = require("bullmq");
-const { crawlQueue } = require("./queue");
+const { crawlQueue, startMetricsCollection, stopMetricsCollection, queueEvents } = require("./queue");
 const { redis, clearCache } = require("./redis");
 const { crawlWebsite } = require("./crawler");
 const fs = require("fs").promises;
 require("dotenv").config();
 
-const CONCURRENT_WORKERS = parseInt(process.env.CONCURRENT_WORKERS) || 10;
+const CONCURRENT_WORKERS = parseInt(process.env.CONCURRENT_WORKERS) || 8;
 const domains = [
   "https://www.amazon.com",
   "https://www.flipkart.com",
@@ -20,48 +20,12 @@ const domains = [
   "https://www.jd.com",
   "https://www.rakuten.com",
   "https://www.zalando.com",
-  "https://www.asos.com",
-  "https://www.sephora.com",
-  "https://www.etsy.com",
-  "https://www.wayfair.com",
-  "https://www.sears.com",
-  "https://www.lazada.com",
-  "https://www.tmall.com",
-  "https://www.shopify.com",
-  "https://www.shopee.com",
-  "https://www.bhphotovideo.com",
-  "https://www.overstock.com",
-  "https://www.carrefour.com",
-  "https://www.costco.com",
-  "https://www.nordstrom.com",
-  "https://www.hm.com",
-  "https://www.apple.com",
-  "https://www.toysrus.com",
-  "https://www.adidas.com",
-  "https://www.nike.com",
-  "https://www.kohls.com",
-  "https://www.jcrew.com",
-  "https://www.anthropologie.com",
-  "https://www.urbanoutfitters.com",
-  "https://www.saksfifthavenue.com",
-  "https://www.boohoo.com",
-  "https://www.forever21.com",
-  "https://www.lululemon.com",
-  "https://www.gap.com",
-  "https://www.homedepot.com",
-  "https://www.ikea.com",
-  "https://www.acehardware.com",
-  "https://www.dillards.com",
-  "https://www.petco.com",
-  "https://www.wayfair.com",
-  "https://www.kroger.com",
-  "https://www.samsclub.com",
-  "https://www.walmart.com",
 ];
 
 (async () => {
   await clearCache();
   let completedJobs = 0;
+  const processedDomains = new Set(); // Track unique processed domains
 
   // Create workers
   const workers = Array.from(
@@ -85,21 +49,22 @@ const domains = [
           concurrency: 1,
           limiter: { max: 1, duration: 2000 },
           settings: {
-            lockDuration: 30000,
-            stalledInterval: 30000,
+            lockDuration: 60000, // Increased from 30000
+            stalledInterval: 60000, // Increased from 30000
           },
         }
       )
   );
 
   try {
-    const jobPromise = new Promise((resolve, reject) => {
-      const TIMEOUT = 60000; // 1 minute timeout per domain
-      const totalTimeout = domains.length * TIMEOUT;
+    // Start metrics collection after Redis is initialized
+    startMetricsCollection();
 
+    const jobPromise = new Promise((resolve, reject) => {
       workers.forEach((worker, i) => {
         worker.on("completed", async (job) => {
           completedJobs++;
+          processedDomains.add(job.data.url);
           const progress = ((completedJobs / domains.length) * 100).toFixed(2);
           console.log(
             `Worker ${i + 1} completed job for ${
@@ -107,17 +72,19 @@ const domains = [
             } (Progress: ${progress}%)`
           );
 
-          if (completedJobs === domains.length) {
-            console.log("All jobs completed successfully");
-            // Create JSON from Redis data
+          // Check if we've processed all unique domains
+          if (processedDomains.size === domains.length) {
+            console.log("All domains processed successfully");
             const urlsData = {};
             for (const domain of domains) {
               const data = await redis.hgetall(`domain:${domain}`);
               if (data) {
                 urlsData[domain] = {
                   name: data.name,
-                  urls: JSON.parse(data.urls || "[]"), // Parse stored URLs back to array
+                  urls: JSON.parse(data.urls || "[]"),
                 };
+              } else {
+                console.log(`Warning: No data found for ${domain}`);
               }
             }
             await fs.writeFile(
@@ -131,17 +98,16 @@ const domains = [
 
         worker.on("failed", (job, err) => {
           completedJobs++;
+          processedDomains.add(job.data.url);
           console.error(`Worker ${i + 1} failed job for ${job.data.url}:`, err);
-          if (completedJobs === domains.length) {
+
+          // Even if job failed, check if we've processed all domains
+          if (processedDomains.size === domains.length) {
+            console.log("All domains processed (some may have failed)");
             resolve();
           }
         });
       });
-
-      setTimeout(
-        () => reject(new Error(`Timeout after ${totalTimeout / 1000}s`)),
-        totalTimeout
-      );
     });
 
     // Add all jobs to queue at once
@@ -154,6 +120,7 @@ const domains = [
             jobId: domain,
             removeOnComplete: true,
             removeOnFail: 10,
+            attempts: 3, // Add retry attempts
           }
         )
       )
@@ -165,9 +132,31 @@ const domains = [
   } catch (error) {
     console.error("Crawl failed:", error.message);
   } finally {
-    // Cleanup
+    console.log('Starting cleanup...');
+    
+    // 1. Stop accepting new jobs
+    await crawlQueue.pause();
+    
+    // 2. Stop metrics collection and wait a moment for any in-flight metrics to complete
+    await stopMetricsCollection();
+    await new Promise(resolve => setTimeout(resolve, 200));
+    
+    // 3. Close workers
+    console.log('Closing workers...');
     await Promise.all(workers.map((worker) => worker.close()));
+    
+    // 4. Close queue events
+    console.log('Closing queue events...');
+    await queueEvents.close();
+    
+    // 5. Close queue
+    console.log('Closing queue...');
     await crawlQueue.close();
+    
+    // 6. Finally close Redis
+    console.log('Closing Redis connection...');
     await redis.quit();
+    
+    console.log('Cleanup complete');
   }
 })().catch(console.error);

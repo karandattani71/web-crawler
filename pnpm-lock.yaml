@@ -23,6 +23,9 @@ importers:
       ioredis:
         specifier: ^5.4.2
         version: 5.4.2
+      node-worker-threads-pool:
+        specifier: ^1.5.1
+        version: 1.5.1
       puppeteer:
         specifier: ^24.1.1
         version: 24.1.1
@@ -610,6 +613,9 @@ packages:
   node-gyp-build-optional-packages@5.2.2:
     resolution: {integrity: sha512-s+w+rBWnpTMwSFbaE0UXsRlg7hU4FjekKU4eyAih5T8nJuNZT1nNsskXpxmeqSK9UzkBl6UgRlnKc8hz8IEqOw==}
     hasBin: true
+
+  node-worker-threads-pool@1.5.1:
+    resolution: {integrity: sha512-7TXAhpMm+jO4MfESxYLtMGSnJWv+itdNHMdaFmeZuPXxwFGU90mtEB42BciUULXOUAxYBfXILAuvrSG3rQZ7mw==}
 
   nth-check@2.1.1:
     resolution: {integrity: sha512-lqjrjmaOoAnWfMmBPL+XNnynZh2+swxiX3WUE0s4yEHI6m+AwrK2UZOimIRl3X/4QctVqS8AiZjFqyOGrMXb/w==}
@@ -1512,6 +1518,8 @@ snapshots:
     dependencies:
       detect-libc: 2.0.3
     optional: true
+
+  node-worker-threads-pool@1.5.1: {}
 
   nth-check@2.1.1:
     dependencies:

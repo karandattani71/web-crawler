@@ -1,16 +1,29 @@
 # E-commerce Product URL Crawler
 
-A scalable web crawler designed to discover and list product URLs from multiple e-commerce websites. Built with Node.js, BullMQ, Redis, and Puppeteer.
+A distributed web crawler that extracts product URLs from major e-commerce websites using BullMQ for job queues and Redis for caching.
 
 ## Features
 
-- 🔍 Smart URL Discovery: Identifies product pages using common e-commerce URL patterns
-- ⚡ Parallel Processing: Uses BullMQ for job queue management and parallel crawling 
-- 🚦 Rate Limiting: Implements respectful crawling with configurable rate limits
-- 💾 Caching: Uses Redis for deduplication and storing discovered URLs
-- 🔄 Dynamic Content: Handles infinite scrolling and JavaScript-rendered content
-- 🛡️ Stealth Mode: Uses Puppeteer with stealth plugins to avoid detection
-- 🔁 Retry Logic: Implements automatic retries for failed requests
+- Concurrent web crawling with configurable workers
+- Distributed job processing with BullMQ
+- Redis-based caching and job management
+- Both static (Axios/Cheerio) and dynamic (Puppeteer) crawling
+- Automatic rate limiting and retry mechanisms
+- Real-time metrics collection
+- Graceful shutdown handling
+- Product URL pattern detection
+- Deduplication of URLs
+
+## Technologies Used
+
+- Node.js
+- Redis
+- BullMQ
+- Puppeteer
+- Cheerio
+- Axios
+
+## Dependencies
 
 ## Technical Stack
 
@@ -23,27 +36,30 @@ A scalable web crawler designed to discover and list product URLs from multiple 
 
 ## Architecture
 
-The crawler implements a distributed architecture with the following components:
+### Components
 
-1. **Queue System (BullMQ)**
-   - Manages crawl jobs across multiple workers
-   - Handles job retries and failures
-   - Implements rate limiting per worker
+1. **Queue System** (queue.js)
+   - BullMQ for job distribution
+   - Queue event monitoring
+   - Real-time metrics collection
+   - Configurable job options
 
-2. **Worker Pool**
-   - Configurable number of concurrent workers
-   - Each worker handles one domain at a time
-   - Implements backoff strategies for failed attempts
+2. **Worker Pool** (workers/WorkerPool.js)
+   - Dynamic worker scaling
+   - Worker thread management
+   - Error handling and retries
+   - Performance metrics
 
-3. **Crawling Strategies**
-   - Static page crawling using Axios + Cheerio
-   - Dynamic page crawling using Puppeteer
-   - Smart scroll detection for infinite scrolling pages
-
-4. **URL Management**
-   - Redis-based URL deduplication
+3. **Crawler Engine** (crawler.js)
+   - Dual crawling strategies (static/dynamic)
    - Product URL pattern matching
-   - Normalized URL storage
+
+4. **Redis Layer** (redis.js)
+   - Connection management
+   - Error handling
+   - Cache management
+   - Event monitoring
+
 
 ## Setup
 

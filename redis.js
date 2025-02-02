@@ -7,6 +7,23 @@ const redis = new Redis({
   username: process.env.REDIS_USERNAME,
   password: process.env.REDIS_PASSWORD,
   maxRetriesPerRequest: null,
+  enableReadyCheck: true,
+  reconnectOnError: function(err) {
+    console.log('Redis reconnect on error:', err);
+    return true;
+  }
+});
+
+redis.on('connect', () => {
+  console.log('Redis connected');
+});
+
+redis.on('error', (err) => {
+  console.error('Redis error:', err);
+});
+
+redis.on('close', () => {
+  console.log('Redis connection closed');
 });
 
 const clearCache = async () => {

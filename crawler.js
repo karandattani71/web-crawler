@@ -1,6 +1,6 @@
 const puppeteer = require("puppeteer-extra");
 const StealthPlugin = require("puppeteer-extra-plugin-stealth");
-const AdblockerPlugin = require('puppeteer-extra-plugin-adblocker');
+const AdblockerPlugin = require("puppeteer-extra-plugin-adblocker");
 const axios = require("axios");
 const cheerio = require("cheerio");
 const { redis } = require("./redis");
@@ -60,7 +60,13 @@ const scrapeStaticPage = async (url) => {
 
     return productUrls;
   } catch (error) {
-    if (error.code === 'ECONNABORTED' || (error.response && error.response.status >= 400) || error.message.includes('timeout') || error.message.includes('40')) {
+    if (
+      error.code === "ECONNABORTED" ||
+      (error.response && error.response.status >= 400) ||
+      error.message.includes("timeout") ||
+      error.message.includes("40") ||
+      error.message.includes("exceeded")
+    ) {
       console.error(`Error scraping static page ${url}: ${error.message}`);
       return [];
     }
@@ -78,12 +84,12 @@ const scrapeDynamicPage = async (url) => {
   const browser = await puppeteer.launch({
     headless: "new",
     args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-accelerated-2d-canvas',
-      '--disable-gpu'
-    ]
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-accelerated-2d-canvas",
+      "--disable-gpu",
+    ],
   });
 
   const page = await browser.newPage();
@@ -91,9 +97,9 @@ const scrapeDynamicPage = async (url) => {
 
   try {
     await page.setUserAgent(axiosConfig.headers["User-Agent"]);
-    await page.goto(url, { 
-      waitUntil: "networkidle2", 
-      timeout: 30000 
+    await page.goto(url, {
+      waitUntil: "networkidle2",
+      timeout: 30000,
     });
 
     // Smooth scrolling with dynamic content detection
@@ -102,8 +108,8 @@ const scrapeDynamicPage = async (url) => {
     const maxScrollAttempts = 20;
 
     while (scrollAttempts < maxScrollAttempts) {
-      const currentHeight = await page.evaluate('document.body.scrollHeight');
-      
+      const currentHeight = await page.evaluate("document.body.scrollHeight");
+
       await page.evaluate(`
         window.scrollTo({
           top: ${currentHeight},
@@ -112,9 +118,9 @@ const scrapeDynamicPage = async (url) => {
       `);
 
       // Use delay instead of waitForTimeout
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise((resolve) => setTimeout(resolve, 1000));
 
-      const newHeight = await page.evaluate('document.body.scrollHeight');
+      const newHeight = await page.evaluate("document.body.scrollHeight");
       if (newHeight === previousHeight) {
         scrollAttempts++;
         if (scrollAttempts >= 3) break; // Stop if height hasn't changed for 3 attempts
@@ -125,28 +131,34 @@ const scrapeDynamicPage = async (url) => {
 
       // Look for "load more" or similar buttons
       const loadMoreButton = await page.evaluate(() => {
-        const buttons = Array.from(document.querySelectorAll('button, [role="button"], a'));
-        return buttons.find(button => {
+        const buttons = Array.from(
+          document.querySelectorAll('button, [role="button"], a')
+        );
+        return buttons.find((button) => {
           const text = button.textContent.toLowerCase();
-          return text.includes('load more') || 
-                 text.includes('show more') || 
-                 text.includes('view more');
+          return (
+            text.includes("load more") ||
+            text.includes("show more") ||
+            text.includes("view more")
+          );
         });
       });
 
       if (loadMoreButton) {
-        await page.evaluate(button => button.click(), loadMoreButton);
-        await new Promise(resolve => setTimeout(resolve, 2000)); // Wait for content to load
+        await page.evaluate((button) => button.click(), loadMoreButton);
+        await new Promise((resolve) => setTimeout(resolve, 2000)); // Wait for content to load
       }
     }
 
     // Extract all product links after scrolling
     const links = await page.evaluate(() => {
       const uniqueLinks = new Set();
-      document.querySelectorAll('a[href]').forEach(a => {
-        if (a.href.includes('/product/') || 
-            a.href.includes('/dp/') || 
-            a.href.includes('/p/')) {
+      document.querySelectorAll("a[href]").forEach((a) => {
+        if (
+          a.href.includes("/product/") ||
+          a.href.includes("/dp/") ||
+          a.href.includes("/p/")
+        ) {
           uniqueLinks.add(a.href);
         }
       });
@@ -155,7 +167,11 @@ const scrapeDynamicPage = async (url) => {
 
     return links;
   } catch (error) {
-    if (error.message.includes('timeout') || error.message.includes('Navigation failed') || error.message.includes('40')) {
+    if (
+      error.message.includes("timeout") ||
+      error.message.includes("Navigation failed") ||
+      error.message.includes("40")
+    ) {
       console.error(`Error scraping dynamic page ${url}: ${error.message}`);
       return [];
     }
@@ -170,23 +186,28 @@ const scrapeDynamicPage = async (url) => {
  */
 const crawlWebsite = async (url, retryCount = 0) => {
   try {
-    const normalizedUrl = new URL(url).href.replace(/\/$/, '');
+    const normalizedUrl = new URL(url).href.replace(/\/$/, "");
 
     // Only check visited status on first attempt, not retries
-    if (retryCount === 0 && await redis.sismember("visited_urls", normalizedUrl)) {
+    if (
+      retryCount === 0 &&
+      (await redis.sismember("visited_urls", normalizedUrl))
+    ) {
       console.log(`Skipping already visited URL: ${normalizedUrl}`);
       return [];
     }
 
     console.log(`Crawling: ${normalizedUrl}`);
-    
+
     const staticUrls = await scrapeStaticPage(url);
     const dynamicUrls = await scrapeDynamicPage(url);
 
     const allProductUrls = [...new Set([...staticUrls, ...dynamicUrls])];
 
     if (allProductUrls.length > 0) {
-      console.log(`Found ${allProductUrls.length} product URLs on ${normalizedUrl}`);
+      console.log(
+        `Found ${allProductUrls.length} product URLs on ${normalizedUrl}`
+      );
       // Only mark as visited and store URLs if we found products
       await redis.sadd("visited_urls", normalizedUrl);
       await redis.sadd(`product_urls:${normalizedUrl}`, ...allProductUrls);
@@ -196,7 +217,6 @@ const crawlWebsite = async (url, retryCount = 0) => {
       console.log(`No product URLs found on ${normalizedUrl}`);
       return [];
     }
-
   } catch (error) {
     console.error(`Skipping domain ${url} due to error: ${error.message}`);
     return [];

@@ -1,13 +1,38 @@
 const { Worker } = require('bullmq');
 const { redis } = require('../redis');
 const { crawlWebsite } = require('../crawler');
+const { StaticPool } = require('node-worker-threads-pool');
 
 class WorkerPool {
-  constructor(queue, workerCount, workerOptions) {
-    this.queue = queue;
-    this.workerCount = workerCount;
-    this.workerOptions = workerOptions;
-    this.workers = [];
+  constructor(size) {
+    this.pool = new StaticPool({
+      size,
+      task: './crawler.js',
+      workerData: {
+        maxRetries: 3,
+        timeout: 30000
+      }
+    });
+    
+    this.metrics = {
+      activeWorkers: 0,
+      completedJobs: 0,
+      failedJobs: 0
+    };
+  }
+
+  async execute(url) {
+    this.metrics.activeWorkers++;
+    try {
+      const result = await this.pool.exec({url});
+      this.metrics.completedJobs++;
+      return result;
+    } catch (error) {
+      this.metrics.failedJobs++;
+      throw error;
+    } finally {
+      this.metrics.activeWorkers--;
+    }
   }
 
   async start() {
