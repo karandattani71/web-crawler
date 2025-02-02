@@ -8,6 +8,10 @@ const { redis } = require("./redis");
 puppeteer.use(StealthPlugin());
 puppeteer.use(AdblockerPlugin({ blockTrackers: true }));
 
+/**
+ * Regular expressions for identifying product URLs
+ * @constant {RegExp[]}
+ */
 const PRODUCT_PATTERNS = [
   /\/product\//, // General product pages (Amazon, Best Buy, etc.)
   /\/item\//, // eBay, Walmart
@@ -29,6 +33,7 @@ const PRODUCT_PATTERNS = [
   /\/offer\//, // Some marketplaces use /offer/ for product pages
 ];
 
+// Check if URL matches any product patterns
 const isProductUrl = (url) =>
   PRODUCT_PATTERNS.some((pattern) => pattern.test(url));
 
@@ -43,7 +48,10 @@ const axiosConfig = {
 };
 
 /**
- * Extract product URLs from a static HTML page using Cheerio
+ * Crawls static pages using Axios and Cheerio
+ * @async
+ * @param {string} url - URL to crawl
+ * @returns {Promise<string[]>} Array of found product URLs
  */
 const scrapeStaticPage = async (url) => {
   try {
@@ -78,7 +86,10 @@ const MAX_RETRIES = 3;
 const RETRY_DELAY = 1000;
 
 /**
- * Extract product URLs from a dynamic JavaScript-rendered page using Puppeteer
+ * Crawls JavaScript-rendered pages using Puppeteer
+ * @async
+ * @param {string} url - URL to crawl
+ * @returns {Promise<string[]>} Array of found product URLs
  */
 const scrapeDynamicPage = async (url) => {
   const browser = await puppeteer.launch({
@@ -123,7 +134,7 @@ const scrapeDynamicPage = async (url) => {
       const newHeight = await page.evaluate("document.body.scrollHeight");
       if (newHeight === previousHeight) {
         scrollAttempts++;
-        if (scrollAttempts >= 3) break; // Stop if height hasn't changed for 3 attempts
+        if (scrollAttempts >= 3) break;
       } else {
         scrollAttempts = 0;
       }
@@ -146,7 +157,7 @@ const scrapeDynamicPage = async (url) => {
 
       if (loadMoreButton) {
         await page.evaluate((button) => button.click(), loadMoreButton);
-        await new Promise((resolve) => setTimeout(resolve, 2000)); // Wait for content to load
+        await new Promise((resolve) => setTimeout(resolve, 2000));
       }
     }
 
@@ -182,7 +193,12 @@ const scrapeDynamicPage = async (url) => {
 };
 
 /**
- * Crawl a website and extract product URLs
+ * Main crawling function
+ * Combines static and dynamic crawling results
+ * @async
+ * @param {string} url - Target domain URL
+ * @param {number} retryCount - Current retry attempt
+ * @returns {Promise<string[]>} Combined unique product URLs
  */
 const crawlWebsite = async (url, retryCount = 0) => {
   try {
@@ -208,10 +224,8 @@ const crawlWebsite = async (url, retryCount = 0) => {
       console.log(
         `Found ${allProductUrls.length} product URLs on ${normalizedUrl}`
       );
-      // Only mark as visited and store URLs if we found products
+      // Only mark as visited if we found products
       await redis.sadd("visited_urls", normalizedUrl);
-      await redis.sadd(`product_urls:${normalizedUrl}`, ...allProductUrls);
-      console.log(`Stored ${allProductUrls.length} URLs for ${normalizedUrl}`); // Debugging line
       return allProductUrls;
     } else {
       console.log(`No product URLs found on ${normalizedUrl}`);

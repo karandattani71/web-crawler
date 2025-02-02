@@ -1,27 +1,42 @@
 const { Worker } = require("bullmq");
-const { crawlQueue, startMetricsCollection, stopMetricsCollection, queueEvents } = require("./queue");
+const {
+  crawlQueue,
+  startMetricsCollection,
+  stopMetricsCollection,
+  queueEvents,
+} = require("./queue");
 const { redis, clearCache } = require("./redis");
 const { crawlWebsite } = require("./crawler");
 const fs = require("fs").promises;
 require("dotenv").config();
 
+// Number of worker threads to create
 const CONCURRENT_WORKERS = parseInt(process.env.CONCURRENT_WORKERS) || 8;
-const domains = [
-  "https://www.amazon.com",
-  "https://www.flipkart.com",
-  "https://www.ebay.com",
-  "https://www.alibaba.com",
-  "https://www.bestbuy.com",
-  "https://www.target.com",
-  "https://www.myntra.com",
-  "https://www.snapdeal.com",
-  "https://www.aliexpress.com",
-  "https://www.newegg.com",
-  "https://www.jd.com",
-  "https://www.rakuten.com",
-  "https://www.zalando.com",
-];
 
+// Get domains from environment variables
+let domains = [];
+try {
+  domains = JSON.parse(process.env.DOMAINS || "[]");
+  if (!Array.isArray(domains) || domains.length === 0) {
+    throw new Error("DOMAINS must be a non-empty array of URLs");
+  }
+  // Validate URLs
+  domains.forEach((domain) => {
+    try {
+      new URL(domain);
+    } catch (e) {
+      throw new Error(`Invalid domain URL: ${domain}`);
+    }
+  });
+} catch (error) {
+  console.error("Error parsing DOMAINS from environment:", error.message);
+  process.exit(1);
+}
+
+/**
+ * Main execution function
+ * Initializes workers, processes domains, and manages cleanup
+ */
 (async () => {
   await clearCache();
   let completedJobs = 0;
@@ -49,8 +64,8 @@ const domains = [
           concurrency: 1,
           limiter: { max: 1, duration: 2000 },
           settings: {
-            lockDuration: 60000, // Increased from 30000
-            stalledInterval: 60000, // Increased from 30000
+            lockDuration: 60000,
+            stalledInterval: 60000,
           },
         }
       )
@@ -120,7 +135,7 @@ const domains = [
             jobId: domain,
             removeOnComplete: true,
             removeOnFail: 10,
-            attempts: 3, // Add retry attempts
+            attempts: 3,
           }
         )
       )
@@ -132,31 +147,31 @@ const domains = [
   } catch (error) {
     console.error("Crawl failed:", error.message);
   } finally {
-    console.log('Starting cleanup...');
-    
+    console.log("Starting cleanup...");
+
     // 1. Stop accepting new jobs
     await crawlQueue.pause();
-    
+
     // 2. Stop metrics collection and wait a moment for any in-flight metrics to complete
     await stopMetricsCollection();
-    await new Promise(resolve => setTimeout(resolve, 200));
-    
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
     // 3. Close workers
-    console.log('Closing workers...');
+    console.log("Closing workers...");
     await Promise.all(workers.map((worker) => worker.close()));
-    
+
     // 4. Close queue events
-    console.log('Closing queue events...');
+    console.log("Closing queue events...");
     await queueEvents.close();
-    
+
     // 5. Close queue
-    console.log('Closing queue...');
+    console.log("Closing queue...");
     await crawlQueue.close();
-    
+
     // 6. Finally close Redis
-    console.log('Closing Redis connection...');
+    console.log("Closing Redis connection...");
     await redis.quit();
-    
-    console.log('Cleanup complete');
+
+    console.log("Cleanup complete");
   }
 })().catch(console.error);

@@ -1,6 +1,10 @@
 const Redis = require("ioredis");
 require("dotenv").config();
 
+/**
+ * Redis connection configuration
+ * Handles connection, events, and error cases
+ */
 const redis = new Redis({
   port: process.env.REDIS_PORT,
   host: process.env.REDIS_HOST,
@@ -26,6 +30,12 @@ redis.on('close', () => {
   console.log('Redis connection closed');
 });
 
+/**
+ * Clears all data from Redis
+ * Used for fresh crawl sessions
+ * @async
+ * @throws {Error} If Redis flush fails
+ */
 const clearCache = async () => {
   try {
     await redis.flushall();

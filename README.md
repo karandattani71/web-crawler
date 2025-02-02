@@ -39,18 +39,21 @@ A distributed web crawler that extracts product URLs from major e-commerce websi
 ### Components
 
 1. **Queue System** (queue.js)
+
    - BullMQ for job distribution
    - Queue event monitoring
    - Real-time metrics collection
    - Configurable job options
 
 2. **Worker Pool** (workers/WorkerPool.js)
+
    - Dynamic worker scaling
    - Worker thread management
    - Error handling and retries
    - Performance metrics
 
 3. **Crawler Engine** (crawler.js)
+
    - Dual crawling strategies (static/dynamic)
    - Product URL pattern matching
 
@@ -60,15 +63,16 @@ A distributed web crawler that extracts product URLs from major e-commerce websi
    - Cache management
    - Event monitoring
 
-
 ## Setup
 
 1. Install dependencies:
+
 ```bash
 npm install
 ```
 
 2. Configure environment variables in `.env`:
+
 ```env
 REDIS_HOST=localhost
 REDIS_PORT=6379
@@ -79,6 +83,7 @@ REDIS_PASSWORD=your_password
 3. Start Redis server
 
 4. Run the crawler:
+
 ```bash
 node index.js
 ```
@@ -88,18 +93,21 @@ node index.js
 Key configuration options in `index.js`:
 
 ```javascript
-const BATCH_SIZE = 5;            // Number of domains per batch
-const CONCURRENT_WORKERS = 5;     // Number of parallel workers
-const CRAWL_TIMEOUT = 120000;    // Crawl timeout (2 minutes)
+const BATCH_SIZE = 5; // Number of domains per batch
+const CONCURRENT_WORKERS = 5; // Number of parallel workers
+const CRAWL_TIMEOUT = 120000; // Crawl timeout (2 minutes)
 ```
 
 Rate limiting in `WorkerPool.js`:
+
 ```javascript
 limiter: {
   max: 2,              // Max requests
   duration: 1000       // Per second per worker
 }
 ```
+
+## Environment Variables
 
 ## Output
 
@@ -109,10 +117,7 @@ The crawler generates a JSON file (`product_urls.json`) with the following struc
 {
   "https://example.com": {
     "name": "example",
-    "urls": [
-      "https://example.com/product/1",
-      "https://example.com/product/2"
-    ]
+    "urls": ["https://example.com/product/1", "https://example.com/product/2"]
   }
 }
 ```
@@ -139,11 +144,13 @@ The crawler generates a JSON file (`product_urls.json`) with the following struc
 ## Future Improvements
 
 1. **Monitoring**
+
    - Add metrics collection
    - Dashboard for crawl progress
    - Alert system for failures
 
 2. **Scalability**
+
    - Kubernetes deployment support
    - Distributed crawler nodes
    - Load balancing
