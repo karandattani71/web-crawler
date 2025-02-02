@@ -1,46 +1,40 @@
 const { Worker } = require('bullmq');
 const { redis } = require('../redis');
-const { crawlWebsite } = require('../crawler');  // Add this import
+const { crawlWebsite } = require('../crawler');
 
 class WorkerPool {
-  constructor(concurrency = 5) {
+  constructor(queue, workerCount, workerOptions) {
+    this.queue = queue;
+    this.workerCount = workerCount;
+    this.workerOptions = workerOptions;
     this.workers = [];
-    this.concurrency = concurrency;
   }
 
-  start() {
-    for (let i = 0; i < this.concurrency; i++) {
+  async start() {
+    for (let i = 0; i < this.workerCount; i++) {
       const worker = new Worker(
-        'crawlQueue',
+        this.queue,
         async (job) => {
           console.log(`Worker ${i + 1} processing: ${job.data.url}`);
-          await crawlWebsite(job.data.url);
-        },
-        { 
-          connection: redis,
-          concurrency: 1,
-          limiter: {
-            max: 2,
-            duration: 1000 // Rate limit: 2 requests per second per worker
+          try {
+            return await crawlWebsite(job.data.url);
+          } catch (error) {
+            console.error(`Error in worker ${i + 1} for URL ${job.data.url}:`, error.message);
+            throw error;
           }
+        },
+        {
+          connection: redis,
+          ...this.workerOptions,
         }
       );
-
-      worker.on('failed', (job, err) => {
-        console.error(`Job ${job.id} failed:`, err);
-        // Retry logic
-        if (job.attemptsMade < 3) {
-          return job.retry();
-        }
-      });
-
       this.workers.push(worker);
     }
   }
 
   async stop() {
-    await Promise.all(this.workers.map(worker => worker.close()));
+    await Promise.all(this.workers.map((worker) => worker.close()));
   }
 }
 
-module.exports = { WorkerPool };  // Export as an object
+module.exports = WorkerPool;

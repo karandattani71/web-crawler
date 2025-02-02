@@ -4,7 +4,6 @@ const AdblockerPlugin = require('puppeteer-extra-plugin-adblocker');
 const axios = require("axios");
 const cheerio = require("cheerio");
 const { redis } = require("./redis");
-const { ScrollDetector } = require("./utils/ScrollDetector");
 
 puppeteer.use(StealthPlugin());
 puppeteer.use(AdblockerPlugin({ blockTrackers: true }));
@@ -61,8 +60,11 @@ const scrapeStaticPage = async (url) => {
 
     return productUrls;
   } catch (error) {
-    console.error(`Error scraping static page ${url}:`, error.message);
-    return [];
+    if (error.code === 'ECONNABORTED' || (error.response && error.response.status >= 400) || error.message.includes('timeout') || error.message.includes('40')) {
+      console.error(`Error scraping static page ${url}: ${error.message}`);
+      return [];
+    }
+    throw error;
   }
 };
 
@@ -153,8 +155,11 @@ const scrapeDynamicPage = async (url) => {
 
     return links;
   } catch (error) {
-    console.error(`Error scraping dynamic page ${url}:`, error.message);
-    return [];
+    if (error.message.includes('timeout') || error.message.includes('Navigation failed') || error.message.includes('40')) {
+      console.error(`Error scraping dynamic page ${url}: ${error.message}`);
+      return [];
+    }
+    throw error;
   } finally {
     await browser.close();
   }
@@ -185,23 +190,15 @@ const crawlWebsite = async (url, retryCount = 0) => {
       // Only mark as visited and store URLs if we found products
       await redis.sadd("visited_urls", normalizedUrl);
       await redis.sadd(`product_urls:${normalizedUrl}`, ...allProductUrls);
+      console.log(`Stored ${allProductUrls.length} URLs for ${normalizedUrl}`); // Debugging line
       return allProductUrls;
     } else {
-      throw new Error('No product URLs found');
+      console.log(`No product URLs found on ${normalizedUrl}`);
+      return [];
     }
 
   } catch (error) {
-    if (retryCount < MAX_RETRIES) {
-      console.log(`Retrying ${url}, attempt ${retryCount + 1}: ${error.message}`);
-      await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * (retryCount + 1)));
-      return crawlWebsite(url, retryCount + 1);
-    }
-    
-    // If all retries failed, ensure URL is not marked as visited
-    const normalizedUrl = new URL(url).href.replace(/\/$/, '');
-    await redis.srem("visited_urls", normalizedUrl);
-    
-    console.error(`Failed to crawl ${url} after ${MAX_RETRIES} attempts: ${error.message}`);
+    console.error(`Skipping domain ${url} due to error: ${error.message}`);
     return [];
   }
 };

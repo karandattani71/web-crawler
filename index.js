@@ -102,50 +102,63 @@ const domains = [
       )
     );
     console.log(`Added batch ${Math.floor(i / BATCH_SIZE) + 1}`);
+
+    // Wait for the batch to complete
+    await new Promise((resolve) => {
+      crawlQueue.on("drained", async () => {
+        // Process results in parallel with streaming write
+        const resultsStream = fs.createWriteStream("product_urls.json", { flags: 'a' });
+        resultsStream.write("{\n");
+
+        for (let j = 0; j < batch.length; j++) {
+          const domain = batch[j];
+          const productUrls = await redis.smembers(`product_urls:${domain}`);
+          console.log(`Retrieved ${productUrls.length} URLs for ${domain}`); // Debugging line
+          const name = domain.match(/https?:\/\/(www\.)?([^./]+)\./)[2];
+
+          resultsStream.write(`  "${domain}": {\n`);
+          resultsStream.write(`    "name": "${name}",\n`);
+          resultsStream.write(`    "urls": [\n`);
+
+          // Write URLs in smaller chunks
+          const CHUNK_SIZE = 50;
+          for (let k = 0; k < productUrls.length; k += CHUNK_SIZE) {
+            const chunk = productUrls.slice(k, k + CHUNK_SIZE);
+            const urlsString = chunk.map((url) => `      "${url}"`).join(",\n");
+            resultsStream.write(
+              urlsString + (k + CHUNK_SIZE < productUrls.length ? ",\n" : "\n")
+            );
+          }
+
+          resultsStream.write("    ]");
+          resultsStream.write(j === batch.length - 1 ? "\n  }\n" : "\n  },\n");
+        }
+
+        resultsStream.write("}\n");
+        resultsStream.end();
+
+        // Wait for file writing to complete
+        await new Promise((resolve) => resultsStream.on("finish", resolve));
+        console.log("Results written to product_urls.json");
+        resolve();
+      });
+    });
   }
 
   try {
-    // Wait for minimum processing time
-    await new Promise((resolve) => setTimeout(resolve, 30000));
-
-    // Process results in parallel with streaming write
-    const resultsStream = fs.createWriteStream("product_urls.json");
-    resultsStream.write("{\n");
-
-    for (let i = 0; i < domains.length; i++) {
-      const domain = domains[i];
-      const productUrls = await redis.smembers(`product_urls:${domain}`);
-      const name = domain.match(/https?:\/\/(www\.)?([^./]+)\./)[2];
-
-      resultsStream.write(`  "${domain}": {\n`);
-      resultsStream.write(`    "name": "${name}",\n`);
-      resultsStream.write(`    "urls": [\n`);
-
-      // Write URLs in smaller chunks
-      const CHUNK_SIZE = 50;
-      for (let j = 0; j < productUrls.length; j += CHUNK_SIZE) {
-        const chunk = productUrls.slice(j, j + CHUNK_SIZE);
-        const urlsString = chunk.map((url) => `      "${url}"`).join(",\n");
-        resultsStream.write(
-          urlsString + (j + CHUNK_SIZE < productUrls.length ? ",\n" : "\n")
-        );
-      }
-
-      resultsStream.write("    ]");
-      resultsStream.write(i === domains.length - 1 ? "\n  }\n" : "\n  },\n");
-    }
-
-    resultsStream.write("}\n");
-    resultsStream.end();
-
-    // Wait for file writing to complete
-    await new Promise((resolve) => resultsStream.on("finish", resolve));
-    console.log("Results written to product_urls.json");
+    // Wait for all jobs to complete
+    await new Promise((resolve) => {
+      crawlQueue.on("drained", async () => {
+        console.log("All batches processed");
+        resolve();
+      });
+    });
   } catch (error) {
     console.error("Crawl failed:", error.message);
   } finally {
     // Cleanup
     await Promise.all(workers.map((worker) => worker.close()));
     await crawlQueue.close();
+    await redis.quit(); // Ensure Redis connection is properly closed
   }
 })().catch(console.error);
