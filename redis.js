@@ -7,7 +7,6 @@ const redis = new Redis({
   username: process.env.REDIS_USERNAME,
   password: process.env.REDIS_PASSWORD,
   maxRetriesPerRequest: null,
-  retryStrategy: (times) => Math.min(times * 50, 2000),
 });
 
 const clearCache = async () => {

@@ -2,10 +2,9 @@ const { Worker } = require("bullmq");
 const { crawlQueue } = require("./queue");
 const { redis, clearCache } = require("./redis");
 const { crawlWebsite } = require("./crawler");
-const fs = require("fs");
+const fs = require("fs").promises;
 require("dotenv").config();
 
-const BATCH_SIZE = parseInt(process.env.BATCH_SIZE) || 10;
 const CONCURRENT_WORKERS = parseInt(process.env.CONCURRENT_WORKERS) || 10;
 const domains = [
   "https://www.amazon.com",
@@ -62,6 +61,7 @@ const domains = [
 
 (async () => {
   await clearCache();
+  let completedJobs = 0;
 
   // Create workers
   const workers = Array.from(
@@ -71,12 +71,19 @@ const domains = [
         "crawlQueue",
         async (job) => {
           console.log(`Worker ${i + 1} processing: ${job.data.url}`);
-          return crawlWebsite(job.data.url);
+          const urls = await crawlWebsite(job.data.url);
+          // Store domain name and URLs in Redis
+          const name = job.data.url.match(/https?:\/\/(www\.)?([^./]+)\./)[2];
+          await redis.hset(`domain:${job.data.url}`, {
+            name: name,
+            urls: JSON.stringify(urls), // Store URLs as stringified array
+          });
+          return urls;
         },
         {
           connection: redis,
           concurrency: 1,
-          limiter: { max: 1, duration: 2000 }, // More conservative rate limiting
+          limiter: { max: 1, duration: 2000 },
           settings: {
             lockDuration: 30000,
             stalledInterval: 30000,
@@ -85,80 +92,82 @@ const domains = [
       )
   );
 
-  // Add jobs with unique job IDs to prevent duplicates
-  for (let i = 0; i < domains.length; i += BATCH_SIZE) {
-    const batch = domains.slice(i, i + BATCH_SIZE);
+  try {
+    const jobPromise = new Promise((resolve, reject) => {
+      const TIMEOUT = 60000; // 1 minute timeout per domain
+      const totalTimeout = domains.length * TIMEOUT;
+
+      workers.forEach((worker, i) => {
+        worker.on("completed", async (job) => {
+          completedJobs++;
+          const progress = ((completedJobs / domains.length) * 100).toFixed(2);
+          console.log(
+            `Worker ${i + 1} completed job for ${
+              job.data.url
+            } (Progress: ${progress}%)`
+          );
+
+          if (completedJobs === domains.length) {
+            console.log("All jobs completed successfully");
+            // Create JSON from Redis data
+            const urlsData = {};
+            for (const domain of domains) {
+              const data = await redis.hgetall(`domain:${domain}`);
+              if (data) {
+                urlsData[domain] = {
+                  name: data.name,
+                  urls: JSON.parse(data.urls || "[]"), // Parse stored URLs back to array
+                };
+              }
+            }
+            await fs.writeFile(
+              "crawled_urls.json",
+              JSON.stringify(urlsData, null, 2)
+            );
+            console.log("Created crawled_urls.json with Redis data");
+            resolve();
+          }
+        });
+
+        worker.on("failed", (job, err) => {
+          completedJobs++;
+          console.error(`Worker ${i + 1} failed job for ${job.data.url}:`, err);
+          if (completedJobs === domains.length) {
+            resolve();
+          }
+        });
+      });
+
+      setTimeout(
+        () => reject(new Error(`Timeout after ${totalTimeout / 1000}s`)),
+        totalTimeout
+      );
+    });
+
+    // Add all jobs to queue at once
     await Promise.all(
-      batch.map((domain) =>
+      domains.map((domain) =>
         crawlQueue.add(
           "crawl",
           { url: domain },
           {
-            jobId: domain, // Use URL as job ID for deduplication
+            jobId: domain,
             removeOnComplete: true,
             removeOnFail: 10,
           }
         )
       )
     );
-    console.log(`Added batch ${Math.floor(i / BATCH_SIZE) + 1}`);
+    console.log(`Added ${domains.length} jobs to queue`);
 
-    // Wait for the batch to complete
-    await new Promise((resolve) => {
-      crawlQueue.on("drained", async () => {
-        // Process results in parallel with streaming write
-        const resultsStream = fs.createWriteStream("product_urls.json", { flags: 'a' });
-        resultsStream.write("{\n");
-
-        for (let j = 0; j < batch.length; j++) {
-          const domain = batch[j];
-          const productUrls = await redis.smembers(`product_urls:${domain}`);
-          console.log(`Retrieved ${productUrls.length} URLs for ${domain}`); // Debugging line
-          const name = domain.match(/https?:\/\/(www\.)?([^./]+)\./)[2];
-
-          resultsStream.write(`  "${domain}": {\n`);
-          resultsStream.write(`    "name": "${name}",\n`);
-          resultsStream.write(`    "urls": [\n`);
-
-          // Write URLs in smaller chunks
-          const CHUNK_SIZE = 50;
-          for (let k = 0; k < productUrls.length; k += CHUNK_SIZE) {
-            const chunk = productUrls.slice(k, k + CHUNK_SIZE);
-            const urlsString = chunk.map((url) => `      "${url}"`).join(",\n");
-            resultsStream.write(
-              urlsString + (k + CHUNK_SIZE < productUrls.length ? ",\n" : "\n")
-            );
-          }
-
-          resultsStream.write("    ]");
-          resultsStream.write(j === batch.length - 1 ? "\n  }\n" : "\n  },\n");
-        }
-
-        resultsStream.write("}\n");
-        resultsStream.end();
-
-        // Wait for file writing to complete
-        await new Promise((resolve) => resultsStream.on("finish", resolve));
-        console.log("Results written to product_urls.json");
-        resolve();
-      });
-    });
-  }
-
-  try {
-    // Wait for all jobs to complete
-    await new Promise((resolve) => {
-      crawlQueue.on("drained", async () => {
-        console.log("All batches processed");
-        resolve();
-      });
-    });
+    await jobPromise;
+    console.log("All processing complete");
   } catch (error) {
     console.error("Crawl failed:", error.message);
   } finally {
     // Cleanup
     await Promise.all(workers.map((worker) => worker.close()));
     await crawlQueue.close();
-    await redis.quit(); // Ensure Redis connection is properly closed
+    await redis.quit();
   }
 })().catch(console.error);
