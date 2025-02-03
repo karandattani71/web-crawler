@@ -40,7 +40,7 @@ try {
 (async () => {
   await clearCache();
   let completedJobs = 0;
-  const processedDomains = new Set(); // Track unique processed domains
+  const processedDomains = new Set();
 
   // Create workers
   const workers = Array.from(
@@ -55,7 +55,7 @@ try {
           const name = job.data.url.match(/https?:\/\/(www\.)?([^./]+)\./)[2];
           await redis.hset(`domain:${job.data.url}`, {
             name: name,
-            urls: JSON.stringify(urls), // Store URLs as stringified array
+            urls: JSON.stringify(urls),
           });
           return urls;
         },

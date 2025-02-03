@@ -20,13 +20,19 @@ const queueEvents = new QueueEvents("crawlQueue", {
   connection: redis,
 });
 
+// Add these variables at the top level
+let completedCount = 0;
+let failedCount = 0;
+
 // Monitor queue events
 queueEvents.on("completed", ({ jobId, returnvalue }) => {
   console.log(`Job ${jobId} completed!`);
+  completedCount++;
 });
 
 queueEvents.on("failed", ({ jobId, failedReason }) => {
   console.error(`Job ${jobId} failed! Reason: ${failedReason}`);
+  failedCount++;
 });
 
 queueEvents.on("active", ({ jobId, prev }) => {
@@ -52,18 +58,16 @@ const getQueueMetrics = async () => {
       return null;
     }
 
-    const [waiting, active, completed, failed] = await Promise.all([
+    const [waiting, active] = await Promise.all([
       crawlQueue.getWaitingCount(),
       crawlQueue.getActiveCount(),
-      crawlQueue.getCompletedCount(),
-      crawlQueue.getFailedCount(),
     ]);
 
     return {
       waiting,
       active,
-      completed,
-      failed,
+      completed: completedCount,
+      failed: failedCount,
       timestamp: Date.now(),
     };
   } catch (error) {
@@ -108,4 +112,8 @@ module.exports = {
   startMetricsCollection,
   stopMetricsCollection,
   queueEvents,
+  resetMetrics: () => {
+    completedCount = 0;
+    failedCount = 0;
+  }
 };
